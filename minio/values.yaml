@@ -1,0 +1,12 @@
+# MinIO Helm Chart Values
+# Minimal configuration with custom credentials
+
+# Authentication
+auth:
+  rootUser: "admin"
+  rootPassword: "admin123"
+
+# Persistence
+persistence:
+  enabled: true
+  size: 10Gi
