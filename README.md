@@ -278,3 +278,42 @@ For issues and questions:
 - Check the troubleshooting section above
 - Review Airflow and MinIO documentation
 - Open an issue in the project repository
+
+
+### What Else I am going to implement in future, if time permits :D 
+
+Typical Next Steps in DE Implementation
+1. Data Quality & Monitoring
+
+Data validation checks (price ranges, volume thresholds, missing data detection)
+Pipeline monitoring and alerting (failed API calls, database issues)
+Data freshness checks and SLA monitoring
+Logging improvements for better observability
+
+2. Scalability & Performance
+
+Batch processing optimization (bulk inserts vs individual records)
+Connection pooling for database operations
+Incremental data loading (only fetch new/updated data)
+Partitioning strategy for the crypto_data table
+
+3. Data Storage Evolution
+
+Historical data archiving strategy
+Data lake integration (raw data storage)
+Multiple data marts for different use cases
+Backup and disaster recovery procedures
+
+4. Analytics & Consumption Layer
+
+Aggregation tables for common queries (daily/weekly/monthly summaries)
+Real-time streaming for price alerts
+API endpoints for data consumption
+Dashboard integration (Grafana, Tableau, etc.)
+
+5. Infrastructure & DevOps
+
+CI/CD pipeline for code deployment
+Environment management (dev/staging/prod)
+Infrastructure as Code (Terraform/CloudFormation)
+Container orchestration improvements
