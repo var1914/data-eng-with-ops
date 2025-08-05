@@ -44,29 +44,46 @@ def execute_planning_phase(**context):
     return results
 
 def extract_symbol_data(symbol, **context):
-    """Main extraction function for a single symbol"""
-    extractor = MinIODataExtractor(
-        symbol,
-        base_url=BASE_URL
-    )
+    """Main extraction function with generator-based batching"""
+    extractor = MinIODataExtractor(symbol, base_url=BASE_URL)
     
     try:
-        # Fetch data
-        raw_data = extractor.fetch_symbol_data()
+        all_metadata = []
+        batch_number = 0
+        total_records = 0
         
-        # Save data to MinIO
-        metadata = extractor.save_raw_data(raw_data)
+        # Process each batch from generator
+        for batch_data in extractor.fetch_symbol_data_in_batches(total_limit=100000):
+            batch_number += 1
+            
+            # Save immediately to MinIO
+            metadata = extractor.save_raw_data(
+                batch_data, 
+                batch_number=batch_number,
+                total_batches=None  # We don't know total until end
+            )
+            
+            all_metadata.append(metadata)
+            total_records += len(batch_data)
+            
+            # Clear batch_data from memory immediately
+            del batch_data
         
-        # Return metadata for downstream tasks
+        # Update metadata with final batch count
+        for meta in all_metadata:
+            meta['total_batches'] = batch_number
+        
         return {
             'symbol': symbol,
             'status': 'success',
-            'metadata': metadata
+            'total_batches': batch_number,
+            'total_records': total_records,
+            'batch_metadata': all_metadata
         }
         
     except Exception as e:
         logging.error(f"Extraction failed for {symbol}: {str(e)}")
-        raise {
+        return {
             'symbol': symbol,
             'status': 'failed',
             'error': str(e)
