@@ -1,6 +1,6 @@
 from pre_checks import PreChecks
 from extraction import MinIODataExtractor
-from push import discover_batches_for_processing, process_symbol_batch, collect_processing_results
+from push import discover_batches_for_processing, process_symbol_batches, collect_processing_results
 
 from datetime import datetime, timedelta
 from airflow import DAG
@@ -208,24 +208,22 @@ with TaskGroup("extraction_group", dag=dag) as extraction_group:
 # Stage 3: PostgreSQL Processing
 with TaskGroup("processing_group", dag=dag) as processing_group:
     
-    # Discover batches to process
+    # Discover all batches to process
     discover_task = PythonOperator(
         task_id='discover_batches',
         python_callable=discover_batches_for_processing,
         dag=dag,
     )
     
-    # This will be dynamically populated based on discovered batches
-    # For now, create processing tasks for each symbol (assuming 1 batch per symbol)
+    # Create processing tasks for each symbol
     processing_tasks = []
     
     for symbol in SYMBOLS:
         # Create processing task for each symbol's batches
-        # In a more advanced setup, you'd dynamically create these based on discovery
         task = PythonOperator(
-            task_id=f'process_batch_{symbol.lower()}_1',
-            python_callable=process_symbol_batch,
-            op_args=[symbol, 1],  # symbol and batch_number
+            task_id=f'process_symbol_{symbol.lower()}',
+            python_callable=process_symbol_batches,
+            op_args=[symbol],  # Pass symbol to process all its batches
             dag=dag,
         )
         processing_tasks.append(task)
@@ -234,6 +232,7 @@ with TaskGroup("processing_group", dag=dag) as processing_group:
     processing_summary = PythonOperator(
         task_id='collect_processing_results',
         python_callable=collect_processing_results,
+        op_args=[SYMBOLS],
         dag=dag,
     )
     

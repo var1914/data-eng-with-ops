@@ -21,7 +21,7 @@ MINIO_CONFIG = {
 DB_CONFIG = {
     "dbname": "postgres",
     "user": "varunrajput", 
-    "password": "your_password",
+    "password": "yourpassword",
     "host": "host.docker.internal",
     "port": "5432"
 }
@@ -290,6 +290,92 @@ class PostgreSQLProcessor:
                 'processing_time': datetime.now().isoformat()
             }
 
+def process_symbol_batches(symbol, **context):
+    """Process all batches for a specific symbol"""
+    task_instance = context['task_instance']
+    
+    # Get discovered batches from upstream task
+    all_discovered_batches = task_instance.xcom_pull(task_ids='processing_group.discover_batches')
+    
+    if not all_discovered_batches:
+        logging.warning(f"No batches discovered for processing")
+        return {
+            'symbol': symbol,
+            'total_batches': 0,
+            'processed_batches': 0,
+            'failed_batches': 0,
+            'batch_results': []
+        }
+    
+    # Filter batches for this specific symbol
+    symbol_batches = [batch for batch in all_discovered_batches if batch['symbol'] == symbol]
+    
+    if not symbol_batches:
+        logging.warning(f"No batches found for symbol: {symbol}")
+        return {
+            'symbol': symbol,
+            'total_batches': 0,
+            'processed_batches': 0,
+            'failed_batches': 0,
+            'batch_results': []
+        }
+    
+    logging.info(f"Processing {len(symbol_batches)} batches for symbol: {symbol}")
+    
+    all_results = []
+    successful_count = 0
+    failed_count = 0
+    total_records = 0
+    
+    # Sort batches by batch number to process in order
+    symbol_batches.sort(key=lambda x: x['batch_number'])
+    
+    for batch_info in symbol_batches:
+        batch_number = batch_info['batch_number']
+        
+        try:
+            logging.info(f"Processing {symbol} batch {batch_number}")
+            
+            # Process individual batch
+            result = process_symbol_batch(symbol, batch_number, **context)
+            
+            if result['status'] == 'success':
+                successful_count += 1
+                total_records += result.get('records_processed', 0)
+                logging.info(f"Successfully processed: {symbol} batch {batch_number}")
+            else:
+                failed_count += 1
+                logging.error(f"Failed to process: {symbol} batch {batch_number}")
+            
+            all_results.append(result)
+            
+        except Exception as e:
+            failed_count += 1
+            error_result = {
+                'symbol': symbol,
+                'batch_number': batch_number,
+                'status': 'failed',
+                'error': str(e),
+                'processing_time': datetime.now().isoformat()
+            }
+            all_results.append(error_result)
+            logging.error(f"Exception processing {symbol} batch {batch_number}: {str(e)}")
+    
+    # Summary for this symbol
+    symbol_summary = {
+        'symbol': symbol,
+        'total_batches': len(symbol_batches),
+        'processed_batches': successful_count,
+        'failed_batches': failed_count,
+        'total_records_processed': total_records,
+        'batch_results': all_results,
+        'processing_time': datetime.now().isoformat()
+    }
+    
+    logging.info(f"Symbol {symbol} processing complete: {successful_count}/{len(symbol_batches)} batches successful, {total_records} total records")
+    
+    return symbol_summary
+
 def process_symbol_batch(symbol, batch_number, **context):
     """Airflow task function to process a single batch"""
     processor = PostgreSQLProcessor(symbol, batch_number)
@@ -349,48 +435,45 @@ def discover_batches_for_processing(**context):
         logging.error(f"Failed to discover batches: {str(e)}")
         raise
 
-def collect_processing_results(**context):
-    """Collect results from all batch processing tasks"""
+def collect_processing_results(SYMBOLS, **context):
+    """Collect results from all symbol processing tasks"""
     task_instance = context['task_instance']
     
-    # Get list of batches that were processed
-    batches = task_instance.xcom_pull(task_ids='processing_group.discover_batches')
-    
-    if not batches:
-        logging.warning("No batches found from discover_batches task")
-        return {
-            'total_batches': 0,
-            'successful_batches': 0,
-            'failed_batches': 0,
-            'total_records_processed': 0,
-            'processing_time': datetime.now().isoformat(),
-            'batch_results': []
-        }
-    
-    results = []
-    for batch in batches:
-        task_id = f"processing_group.process_batch_{batch['symbol'].lower()}_{batch['batch_number']}"
-        result = task_instance.xcom_pull(task_ids=task_id)
-        if result:
-            results.append(result)
-    
-    # Calculate summary statistics
-    successful_batches = [r for r in results if r['status'] == 'success']
-    failed_batches = [r for r in results if r['status'] == 'failed']
-    total_records = sum(r.get('records_processed', 0) for r in successful_batches)
-    
-    summary = {
-        'total_batches': len(results),
-        'successful_batches': len(successful_batches),
-        'failed_batches': len(failed_batches),
-        'total_records_processed': total_records,
-        'processing_time': datetime.now().isoformat(),
-        'batch_results': results
+    all_symbol_results = []
+    overall_stats = {
+        'total_symbols': len(SYMBOLS),
+        'total_batches': 0,
+        'successful_batches': 0,
+        'failed_batches': 0,
+        'total_records_processed': 0
     }
     
-    logging.info(f"Processing Summary: {len(successful_batches)}/{len(results)} batches successful, {total_records} total records")
+    # Collect results from each symbol processing task
+    for symbol in SYMBOLS:
+        task_id = f'processing_group.process_symbol_{symbol.lower()}'
+        symbol_result = task_instance.xcom_pull(task_ids=task_id)
+        
+        if symbol_result:
+            all_symbol_results.append(symbol_result)
+            
+            # Aggregate stats
+            overall_stats['total_batches'] += symbol_result.get('total_batches', 0)
+            overall_stats['successful_batches'] += symbol_result.get('processed_batches', 0)
+            overall_stats['failed_batches'] += symbol_result.get('failed_batches', 0)
+            overall_stats['total_records_processed'] += symbol_result.get('total_records_processed', 0)
+        else:
+            logging.warning(f"No result found for symbol: {symbol}")
     
-    # Save processing summary to MinIO
+    # Create final summary
+    final_summary = {
+        'processing_time': datetime.now().isoformat(),
+        'overall_stats': overall_stats,
+        'symbol_results': all_symbol_results
+    }
+    
+    logging.info(f"Overall Processing Summary: {overall_stats['successful_batches']}/{overall_stats['total_batches']} batches successful across {len(SYMBOLS)} symbols")
+    
+    # Save summary to MinIO (same as before)
     try:
         minio_client = Minio(
             MINIO_CONFIG['endpoint'],
@@ -402,7 +485,7 @@ def collect_processing_results(**context):
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         summary_key = f"processing_summaries/processing_summary_{timestamp}.json"
         
-        json_bytes = json.dumps(summary, indent=2).encode('utf-8')
+        json_bytes = json.dumps(final_summary, indent=2).encode('utf-8')
         json_stream = BytesIO(json_bytes)
         
         minio_client.put_object(
@@ -417,6 +500,5 @@ def collect_processing_results(**context):
         
     except Exception as e:
         logging.error(f"Failed to save processing summary: {str(e)}")
-        # Don't fail the task if summary save fails
     
-    return summary
+    return final_summary

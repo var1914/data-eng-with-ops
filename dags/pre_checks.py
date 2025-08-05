@@ -73,7 +73,7 @@ class PreChecks:
     self.db_config = db_config or {
       "dbname": "postgres",
       "user": "varunrajput", 
-      "password": "your_password",
+      "password": "yourpassword",
       "host": "host.docker.internal",
       "port": "5432"
     }
