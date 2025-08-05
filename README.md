@@ -1,7 +1,7 @@
 # Cryptocurrency Data Pipeline with Airflow
 
 A complete ETL pipeline that extracts cryptocurrency data from Binance API, stores raw data in MinIO object storage, and processes it into PostgreSQL for analysis.
-![alt text](image.png)
+![Airflow_Pipeline](crypto_data_planning-graph.png)
 
 ## Architecture Overview
 
